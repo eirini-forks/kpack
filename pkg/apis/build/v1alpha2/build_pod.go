@@ -1,7 +1,6 @@
 package v1alpha2
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -195,11 +194,6 @@ func (b *Build) BuildPod(images BuildPodImages, buildContext BuildContext) (*cor
 	}
 	dnsProbeHost := ref.Context().RegistryStr()
 
-	envVars, err := json.Marshal(b.Spec.Env)
-	if err != nil {
-		return nil, err
-	}
-
 	secretVolumes, secretVolumeMounts, secretArgs := b.setupSecretVolumesAndArgs(buildContext.Secrets, gitAndDockerSecrets)
 	cosignVolumes, cosignVolumeMounts, cosignSecretArgs := b.setupCosignVolumes(buildContext.Secrets)
 	imagePullVolumes, imagePullVolumeMounts, imagePullArgs := b.setupImagePullVolumes(buildContext.ImagePullSecrets)
@@ -379,6 +373,11 @@ func (b *Build) BuildPod(images BuildPodImages, buildContext BuildContext) (*cor
 			}),
 			SecurityContext: podSecurityContext(buildContext.BuildPodBuilderConfig),
 			InitContainers: steps(func(step func(corev1.Container, ...stepModifier)) {
+				env := b.Spec.Source.Source().BuildEnvVars()
+				for _, v := range b.Spec.Env {
+					v.Name = "APP_ENV_VAR_" + v.Name
+					env = append(env, v)
+				}
 				step(
 					corev1.Container{
 						Name:      PrepareContainerName,
@@ -386,7 +385,7 @@ func (b *Build) BuildPod(images BuildPodImages, buildContext BuildContext) (*cor
 						Args:      append(secretArgs, imagePullArgs...),
 						Resources: b.Spec.Resources,
 						Env: append(
-							b.Spec.Source.Source().BuildEnvVars(),
+							env,
 							corev1.EnvVar{
 								Name:  "SOURCE_SUB_PATH",
 								Value: b.Spec.Source.SubPath,
@@ -394,10 +393,6 @@ func (b *Build) BuildPod(images BuildPodImages, buildContext BuildContext) (*cor
 							corev1.EnvVar{
 								Name:  "PROJECT_DESCRIPTOR_PATH",
 								Value: b.Spec.ProjectDescriptorPath,
-							},
-							corev1.EnvVar{
-								Name:  "PLATFORM_ENV_VARS",
-								Value: string(envVars),
 							},
 							corev1.EnvVar{
 								Name:  "IMAGE_TAG",
